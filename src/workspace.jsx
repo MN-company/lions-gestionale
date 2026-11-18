@@ -164,6 +164,31 @@ function Team({back}) {
   </section>;
 }
 
+function McpAccess() {
+  const [secret,setSecret] = useState('');
+  const [status,setStatus] = useState('');
+  const action = useAction();
+  async function change(revoke) {
+    setStatus('');
+    await action.run(async () => {
+      const token = await result(db.rpc('manage_mcp_key',{revoke_key:revoke}));
+      setSecret(token || '');
+      setStatus(revoke ? 'Chiave revocata.' : 'Chiave creata. Copiala ora: verrà mostrata solo qui.');
+    });
+  }
+  return <div className="mcp-access">
+    <h2>Collegamento AI (MCP)</h2>
+    <p className="muted">Usa questo indirizzo con un client MCP che accetta un header personalizzato. La chiave scade dopo 90 giorni. Generarne un’altra revoca quella precedente.</p>
+    <label>Indirizzo del server<input readOnly value={location.origin + '/api/mcp'} onFocus={event => event.target.select()}/></label>
+    <div className="actions"><button disabled={action.working} onClick={() => change(false)}>Genera chiave MCP</button><button disabled={action.working} onClick={() => change(true)}>Revoca chiave</button></div>
+    {secret && <label>Valore dell’header Authorization<input readOnly value={'Bearer ' + secret} onFocus={event => event.target.select()}/><button type="button" onClick={() => action.run(async () => {
+      await navigator.clipboard.writeText('Bearer ' + secret);setStatus('Valore copiato.');
+    })}>Copia valore</button></label>}
+    {status && <p role="status">{status}</p>}
+    <ErrorLine text={action.error}/>
+  </div>;
+}
+
 function Detail({id,staff,back,justSubmitted}) {
   const [item,setItem] = useState(null);
   const [revisions,setRevisions] = useState([]);
@@ -176,6 +201,8 @@ function Detail({id,staff,back,justSubmitted}) {
   const [anchor,setAnchor] = useState(null);
   const [staffNote,setStaffNote] = useState(false);
   const textRef = useRef(null);
+  const commentRef = useRef(null);
+  const [copyFeedback,setCopyFeedback] = useState('');
   const action = useAction();
   async function refresh() {
     const [submission,versions,messages] = await Promise.all([
@@ -222,9 +249,15 @@ function Detail({id,staff,back,justSubmitted}) {
         <label>Versione<select value={version} onChange={event => {setVersion(event.target.value);setAnchor(null);setMode('read');}}>
           <option value="">{item.kind === 'service' ? 'Scheda inviata' : 'Testo originale'}</option>
           {revisions.map((entry,index) => <option key={entry.id} value={entry.id}>Revisione {revisions.length-index} · {entry.source === 'ai' ? 'AI' : 'Redazione'} · {entry.shared ? 'Condivisa' : 'Interna'}</option>)}</select></label>
+        {currentText && mode !== 'edit' && <button onClick={async () => {
+          try {await navigator.clipboard.writeText(currentText);setCopyFeedback('Testo copiato.');}
+          catch {setCopyFeedback('Copia non riuscita. Seleziona il testo e copialo manualmente.');}
+        }}>Copia testo</button>}
+        {currentText && mode === 'read' && <button disabled={!anchor} onClick={() => commentRef.current?.focus()}>Evidenzia e annota</button>}
         {staff && <button disabled={action.working} onClick={() => {setDraft(currentText);setMode('edit');setAnchor(null);}}>Nuova revisione</button>}
         {revision && mode !== 'edit' && <button onClick={() => {setMode(mode === 'diff' ? 'read' : 'diff');setAnchor(null);}}>{mode === 'diff' ? 'Leggi versione' : 'Confronta con l’originale'}</button>}
       </div>
+      {copyFeedback && <p className="muted" role="status">{copyFeedback}</p>}
       {mode === 'edit' ? <form onSubmit={event => {
         event.preventDefault();
         const note = new FormData(event.currentTarget).get('note');
@@ -238,7 +271,7 @@ function Detail({id,staff,back,justSubmitted}) {
           await result(db.from('revisions').update({shared:!revision.shared}).eq('id',revision.id).select('id').single());await refresh();
         })}>{revision.shared ? 'Rendi interna' : 'Condividi con l’autore'}</button>}</div>}
         {mode === 'diff' ? <div className="reading">{diffWordsWithSpace(item.original,currentText,{maxEditLength:3000})?.map((part,i) => part.added ? <ins key={i}>{part.value}</ins> : part.removed ? <del key={i}>{part.value}</del> : <React.Fragment key={i}>{part.value}</React.Fragment>) || 'Differenze troppo estese per il confronto in linea.'}</div>
-          : currentText ? <div className="reading" ref={textRef} tabIndex={0} onMouseUp={selectAnchor} onKeyUp={selectAnchor}>{markedParts(currentText,currentComments).map((part,i) => part.highlighted ? <mark key={i}>{part.text}</mark> : <React.Fragment key={i}>{part.text}</React.Fragment>)}</div>
+          : currentText ? <div className="reading" ref={textRef} tabIndex={0} onMouseUp={selectAnchor} onKeyUp={selectAnchor}>{markedParts(currentText,anchor ? [...currentComments,anchor] : currentComments).map((part,i) => part.highlighted ? <mark key={i}>{part.text}</mark> : <React.Fragment key={i}>{part.text}</React.Fragment>)}</div>
           : <dl className="facts">{serviceGroups.flatMap(([,fields]) => fields).filter(([key]) => item.fields[key]).map(([key,label]) => <div key={key}><dt>{label}</dt><dd>{item.fields[key]}</dd></div>)}</dl>}
         {currentText && mode === 'read' && <p className="muted">{currentText.length.toLocaleString('it-IT')} battute · Seleziona un passaggio per annotarlo.</p>}
       </>}
@@ -250,13 +283,13 @@ function Detail({id,staff,back,justSubmitted}) {
           {msg.anchor && <blockquote>{msg.anchor}</blockquote>}<p>{msg.body}</p>
         </div>)}</div>
         <form onSubmit={event => {event.preventDefault();action.run(async () => {
-          await result(db.from('comments').insert({submission_id:id,revision_id:revision?.id || null,body:comment.trim(),staff_note:staff && (staffNote || Boolean(revision && !revision.shared)),...anchor}));
+          await result(db.from('comments').insert({submission_id:id,revision_id:revision?.id || null,body:comment.trim() || 'Passaggio evidenziato.',staff_note:staff && (staffNote || Boolean(revision && !revision.shared)),...anchor}));
           setComment('');setAnchor(null);setStaffNote(false);await refresh();
         });}}>
           {anchor && <div className="selection"><blockquote>{anchor.anchor}</blockquote><button type="button" onClick={() => setAnchor(null)}>Rimuovi selezione</button></div>}
-          <label>{anchor ? 'Annota il passaggio' : 'Scrivi un commento'}<textarea value={comment} maxLength={8000} onChange={event => setComment(event.target.value)} required/></label>
+          <label>{anchor ? 'Annota il passaggio' : 'Scrivi un commento'}<textarea ref={commentRef} value={comment} maxLength={8000} onChange={event => setComment(event.target.value)} required={!anchor}/></label>
           {staff && (revision && !revision.shared ? <p className="muted">Nota interna</p> : <label className="checkbox"><input type="checkbox" checked={staffNote} onChange={event => setStaffNote(event.target.checked)}/> Nota interna</label>)}
-          <button className="primary" disabled={action.working || !comment.trim()}>Salva commento</button>
+          <button className="primary" disabled={action.working || (!anchor && !comment.trim())}>{anchor ? 'Salva evidenziazione' : 'Salva commento'}</button>
         </form>
       </aside>
     </div>
@@ -345,7 +378,7 @@ export function Dashboard({user,role}) {
         {(page > 0 || next) && <div className="actions paging"><button disabled={!page} onClick={() => setPage(page-1)}>Precedente</button><button disabled={!next} onClick={() => setPage(page+1)}>Successiva</button></div>}
       </section>
     </> : activeView === 'new' ? <><button className="text-button" onClick={back}>← Torna agli invii</button><div className="page-heading choose-heading" data-enter><div><h1>Nuovo invio</h1><p>Scegli il modulo per il tuo contributo.</p></div></div><SubmissionChoices navigate={navigate}/></>
-    : activeView === 'account' ? <section className="panel form-panel account-panel"><h1>Il mio account</h1><p>{user.email}</p><h2>Codice account per la redazione</h2><p className="muted">Comunicalo direttamente alla Direzione se deve assegnarti il ruolo Redattore.</p><div className="file-row"><code>{user.id}</code><button onClick={async () => {try {await navigator.clipboard.writeText(user.id);setCopyStatus('Codice copiato.');} catch {setCopyStatus('Seleziona il codice per copiarlo manualmente.');}}}>Copia codice</button></div>{copyStatus && <p role="status">{copyStatus}</p>}</section>
+    : activeView === 'account' ? <section className="panel form-panel account-panel"><h1>Il mio account</h1><p>{user.email}</p><h2>Codice account per la redazione</h2><p className="muted">Comunicalo direttamente alla Direzione se deve assegnarti il ruolo Redattore.</p><div className="file-row"><code>{user.id}</code><button onClick={async () => {try {await navigator.clipboard.writeText(user.id);setCopyStatus('Codice copiato.');} catch {setCopyStatus('Seleziona il codice per copiarlo manualmente.');}}}>Copia codice</button></div>{copyStatus && <p role="status">{copyStatus}</p>}{staff && <McpAccess/>}</section>
     : activeView === 'team' ? <Team back={back}/>
     : kinds[activeView] ? <Submit key={activeView} kind={activeView} user={user} open={id => {setSubmitted(id);navigate(id,true);}} back={() => navigate('new')}/>
     : <Detail key={activeView} id={activeView} staff={staff} back={back} justSubmitted={submitted === activeView}/>}

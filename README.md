@@ -31,3 +31,11 @@ La Direzione può autorizzare e revocare i redattori dalla sezione Collaboratori
 4. In ChatGPT la disponibilità delle azioni di scrittura dipende dal piano e dalle impostazioni del workspace. Claude è disponibile tramite connettore remoto nei piani che lo supportano.
 
 L’importazione automatica del testo supporta DOCX e TXT. Gli altri formati possono essere allegati. Per la revisione di un articolo occorre anche un testo modificabile.
+
+### Chiave MCP per Claude e ChatGPT
+
+Nella scrivania vai a **Il mio account → Collegamento AI (MCP)** e genera una chiave. Il valore completo da copiare comincia con `Bearer`. Nel client imposta l’URL indicato e un header HTTP chiamato `Authorization` con quel valore. In Claude si trova in **Customize → Connectors → Add custom connector → Request headers**. Se il client chiede il tipo di autenticazione per questo flusso, seleziona la modalità senza login OAuth. Per un plugin nella chat di ChatGPT usa OAuth: la configurazione standard del plugin non offre un campo per un bearer statico. I client MCP con header configurabili devono inviare il valore ad ogni chiamata. La chiave scade dopo 90 giorni, si revoca dal portale e può operare solo finché l’account ha un ruolo di redazione. L’opzione OAuth rimane disponibile quando attiva in Supabase.
+
+## Rilascio da GitHub
+
+Il workflow `.github/workflows/production.yml` usa il branch `main`: esegue i test, compila su Vercel, applica le migrazioni Supabase e pubblica la build. In **Settings → Secrets and variables → Actions** occorrono `SUPABASE_ACCESS_TOKEN`, `SUPABASE_DB_PASSWORD` e `VERCEL_TOKEN` con accesso ai progetti indicati nel workflow. Una volta salvati, avvia il workflow **Redazione LION production** oppure pubblica un commit su `main`. I file di migrazione usano le versioni già registrate in produzione.

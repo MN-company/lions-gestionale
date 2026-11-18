@@ -57,6 +57,17 @@ async function call(db,name,args,base) {
   throw Error('Strumento sconosciuto.');
 }
 
+async function callWithKey(db,key,name,args,origin) {
+  if (name === 'leggi_linea_editoriale') return content({linea_editoriale:policy});
+  if (!tools.some(entry => entry.name === name)) throw Error('Strumento sconosciuto.');
+  const data = await checked(db.rpc('editorial_mcp',{mcp_key:key,operation:name,args}));
+  if (data === null) throw Error('Chiave MCP scaduta o revocata.');
+  const link = id => origin + '/?invio=' + id;
+  if (name === 'search') return content({results:data.results.map(item => ({...item,url:link(item.id)}))});
+  if (name === 'fetch') return content({id:data.item.id,title:data.item.club,text:JSON.stringify(data),url:link(data.item.id)});
+  return content(data);
+}
+
 export default async function handler(req,res) {
   const origin = process.env.APP_ORIGIN;
   const supabaseUrl = process.env.VITE_SUPABASE_URL;
@@ -73,16 +84,24 @@ export default async function handler(req,res) {
     res.setHeader('WWW-Authenticate','Bearer resource_metadata="'+metadata+'"');
     return res.status(401).end();
   }
+  const token = auth.slice(7);
+  const usingKey = /^lion_mcp_[a-f0-9]{64}$/.test(token);
   const db = createClient(supabaseUrl,process.env.VITE_SUPABASE_PUBLISHABLE_KEY,{
-    global:{headers:{Authorization:auth}},auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false},
+    ...(usingKey ? {} : {global:{headers:{Authorization:auth}}}),
+    auth:{persistSession:false,autoRefreshToken:false,detectSessionInUrl:false},
   });
-  const {data,error} = await db.auth.getClaims(auth.slice(7));
-  if (error || !data?.claims?.sub || !data.claims.client_id || data.claims.iss !== supabaseUrl+'/auth/v1') {
-    res.setHeader('WWW-Authenticate','Bearer error="invalid_token", resource_metadata="'+metadata+'"');
-    return res.status(401).end();
+  if (usingKey) {
+    const {data,error} = await db.rpc('editorial_mcp',{mcp_key:token,operation:'verify'});
+    if (error || data !== true) return res.status(401).end();
+  } else {
+    const {data,error} = await db.auth.getClaims(token);
+    if (error || !data?.claims?.sub || !data.claims.client_id || data.claims.iss !== supabaseUrl+'/auth/v1') {
+      res.setHeader('WWW-Authenticate','Bearer error="invalid_token", resource_metadata="'+metadata+'"');
+      return res.status(401).end();
+    }
+    const member = await db.from('redazione_members').select('role').eq('user_id',data.claims.sub).maybeSingle();
+    if (member.error || !member.data) return res.status(403).end();
   }
-  const member = await db.from('redazione_members').select('role').eq('user_id',data.claims.sub).maybeSingle();
-  if (member.error || !member.data) return res.status(403).end();
   if (req.method !== 'POST') {res.setHeader('Allow','POST');return res.status(405).end();}
   const request = req.body;
   const id = request?.id ?? null;
@@ -99,7 +118,10 @@ export default async function handler(req,res) {
   if (request.method === 'ping') return send({});
   if (request.method === 'tools/list') return send({tools});
   if (request.method === 'tools/call') {
-    try {return send(await call(db,request.params?.name,request.params?.arguments || {},origin));}
+    try {
+      const {name,arguments:args={}} = request.params || {};
+      return send(await (usingKey ? callWithKey(db,token,name,args,origin) : call(db,name,args,origin)));
+    }
     catch (error) {return send({isError:true,content:[{type:'text',text:error.message}]});}
   }
   return fail(-32601,'Metodo non supportato');
