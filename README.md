@@ -12,18 +12,16 @@ Portale editoriale per la rivista nazionale LION. Gli autori inviano articoli o 
 ## Configurazione in produzione
 
 - In Vercel usa il preset Vite, imposta le tre variabili e usa l’indirizzo pubblico canonico per `APP_ORIGIN`.
-- In Supabase Auth imposta lo stesso indirizzo come Site URL e tieni la conferma email attiva. Configura un mittente verificato con SMTP personalizzato per le email di conferma e recupero password. Il servizio email predefinito è riservato agli indirizzi del team Supabase.
-- Per assegnare il primo ruolo Direzione, la persona deve registrarsi e confermare la propria email. In SQL Editor esegui la seguente query dopo aver sostituito l’indirizzo. Disconnetti e riconnetti l’account per caricare il ruolo.
+- In Supabase Auth imposta lo stesso indirizzo come Site URL. Configura SMTP se vuoi inviare conferme di registrazione o link di recupero password. Senza conferma l’indirizzo di registrazione è autodichiarato.
+- Per assegnare il primo ruolo Direzione, chiedi alla persona di comunicarti direttamente il codice account mostrato nella sua scrivania dopo l’accesso. In SQL Editor usa quel codice.
 
 ```sql
 insert into public.redazione_members (user_id, role)
-select id, 'admin' from auth.users
-where lower(email) = 'indirizzo-verificato@example.org'
-  and email_confirmed_at is not null
+values ('codice-account', 'admin')
 on conflict (user_id) do update set role = excluded.role;
 ```
 
-La Direzione può autorizzare e revocare i redattori dalla sezione Collaboratori. L’autorizzazione si applica al successivo accesso con l’indirizzo verificato. Il link al portale può essere condiviso dalla Direzione.
+La Direzione può autorizzare e revocare i redattori dalla sezione Collaboratori. Per autorizzare un redattore, inserisci il codice account che ti ha comunicato direttamente. Il ruolo si carica al prossimo accesso.
 
 ## Configurare il collegamento MCP
 

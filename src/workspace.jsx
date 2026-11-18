@@ -109,27 +109,22 @@ function Submit({kind,user,open,back}) {
 
 function Team({back}) {
   const [team,setTeam] = useState([]);
-  const [pending,setPending] = useState([]);
   const action = useAction();
   async function load() {
-    const [members,invited] = await Promise.all([result(db.rpc('editor_list')),result(db.from('editor_invites').select('*').order('created_at',{ascending:false}))]);
-    setTeam(members);setPending(invited);
+    setTeam(await result(db.rpc('editor_list')));
   }
   useEffect(() => {action.run(load);},[]);
   return <section className="panel form-panel"><button className="text-button" onClick={back}>← Torna agli invii</button><h1>Collaboratori</h1>
-    <p>Autorizza l’indirizzo del redattore e condividi con lui il link al portale. Il ruolo si attiva quando accede con quell’indirizzo verificato.</p>
+    <p>Chiedi alla persona che vuoi aggiungere di comunicarti direttamente il codice account che vede nella sua scrivania.</p>
     <form className="inline" onSubmit={event => {
       event.preventDefault();
       const form = event.currentTarget;
-      const email = new FormData(form).get('email').trim().toLowerCase();
-      action.run(async () => {await result(db.from('editor_invites').insert({email}));form.reset();await load();});
-    }}><label>Email del redattore<input type="email" name="email" required/></label><button className="primary" disabled={action.working}>Autorizza</button></form>
+      const account_id = new FormData(form).get('account_id').trim();
+      action.run(async () => {await result(db.rpc('grant_editor',{account_id}));form.reset();await load();});
+    }}><label>Codice account del redattore<input name="account_id" minLength={36} maxLength={36} required/></label><button className="primary" disabled={action.working}>Autorizza</button></form>
     <h2>Redazione</h2>{team.map(member => <div key={member.email} className="file-row"><span>{member.email} · {member.role === 'admin' ? 'Direzione' : 'Redattore'}</span>{member.role === 'editor' && <button disabled={action.working} onClick={() => action.run(async () => {
       await result(db.rpc('revoke_editor',{address:member.email}));await load();
     })}>Revoca</button>}</div>)}
-    {pending.length > 0 && <h2>In attesa di accesso</h2>}{pending.map(invite => <div key={invite.email} className="file-row"><span>{invite.email}</span><button disabled={action.working} onClick={() => action.run(async () => {
-      await result(db.from('editor_invites').delete().eq('email',invite.email));await load();
-    })}>Annulla</button></div>)}
     <ErrorLine text={action.error}/>
   </section>;
 }
@@ -271,6 +266,7 @@ export function Dashboard({user,role}) {
         {items.map(item => <button className="submission" key={item.id} onClick={() => setView(item.id)}><span><strong>{headline(item)}</strong><small>{[item.club,item.district,kinds[item.kind]].filter(Boolean).join(' · ')}</small></span><time>{fmt.format(new Date(item.created_at))}</time><span className={'status '+item.status}>{statuses[item.status]}</span><span className="arrow">→</span></button>)}
         {(page > 0 || next) && <div className="actions paging"><button disabled={!page} onClick={() => setPage(page-1)}>Precedente</button><button disabled={!next} onClick={() => setPage(page+1)}>Successiva</button></div>}
       </section>
+      {!staff && <details className="muted"><summary>Codice account per la redazione</summary><p><code>{user.id}</code></p></details>}
     </> : view === 'team' ? <Team back={back}/> : kinds[view] ? <Submit key={view} kind={view} user={user} open={setView} back={back}/> : <Detail key={view} id={view} staff={staff} back={back}/>}
   </main>;
 }

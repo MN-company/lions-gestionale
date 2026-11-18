@@ -86,7 +86,6 @@ function App() {
     if (!userId) return;
     let active = true;
     (async () => {
-      await result(db.rpc('accept_editor_invite'));
       const member = await result(db.from('redazione_members').select('role').eq('user_id',userId).maybeSingle());
       if (active) setRole(member?.role || '');
     })().catch(err => {if (active) setError(err.message);});
