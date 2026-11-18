@@ -27,8 +27,8 @@ function Auth({recovery,finish}) {
     } catch (error) {setMessage(error.message);}
     finally {setBusy(false);}
   }
-  return <main className="auth-layout"><section className="intro"><span className="eyebrow">RIVISTA NAZIONALE LION</span><h1>La tua storia,<br/>in redazione.</h1><p>Invia un articolo o racconta un service del tuo club. Segui la revisione e dialoga con la redazione nello stesso spazio.</p><div className="intro-rule"/></section><section className="auth-card panel">
-    <h2>{recovery ? 'Nuova password' : {login:'Accedi',register:'Crea un account',reset:'Recupera la password'}[mode]}</h2>
+  return <main id="contenuto" className="auth-layout"><section className="intro" data-enter><span className="eyebrow">Rivista nazionale LION</span><h1>Portale<br/>di redazione<span>.</span></h1><p>Invia un articolo o racconta un service del tuo club. Qui segui la revisione e rispondi alla redazione.</p><div className="intro-index"><span>Articoli</span><span>Service</span><span>Revisioni</span></div></section><section className="auth-card panel">
+    <h2 className="auth-heading">{recovery ? 'Nuova password' : {login:'Accedi',register:'Crea un account',reset:'Recupera la password'}[mode]}</h2>
     <form onSubmit={submit}>
       {!recovery && <label>Email<input name="email" type="email" autoComplete="email" required/></label>}
       {(recovery || mode !== 'reset') && <label>Password<input name="password" type="password" minLength={recovery || mode === 'register' ? 8 : undefined} autoComplete={mode === 'login' && !recovery ? 'current-password' : 'new-password'} required/></label>}
@@ -56,7 +56,7 @@ function Consent({role}) {
       location.assign((await result(action)).redirect_url);
     } catch(err) {setError(err.message);setBusy(false);}
   }
-  return <main className="container"><section className="panel"><h1>Collega un’app alla redazione</h1>
+  return <main id="contenuto" className="container"><section className="panel"><h1>Collega un’app alla redazione</h1>
     {role === null ? <p>Verifica del ruolo…</p> : !role ? <p>Il collegamento è riservato alla redazione.</p> : details ? <>
       <p>{details.client?.name || 'L’app richiedente'} chiede di leggere gli invii e salvare bozze e note interne.</p>
       <p className="muted">Indirizzo di ritorno: {details.redirect_uri}</p>
@@ -91,15 +91,15 @@ function App() {
     })().catch(err => {if (active) setError(err.message);});
     return () => {active = false;};
   },[userId]);
-  return <><header className="masthead"><div className="topbar"><a className="brand" href="/"><strong>LION</strong><span>Redazione</span></a>{session && <div className="account"><span>{role === 'admin' ? 'Direzione' : role === 'editor' ? 'Redazione' : session.user.email}</span><button onClick={() => db.auth.signOut()}>Esci</button></div>}</div></header>
-    {!db ? <main className="container"><p role="alert">Configurazione di Supabase mancante.</p></main>
-      : session === undefined ? <main className="container"><p>Caricamento…</p></main>
+  return <><a className="skip-link" href="#contenuto">Vai al contenuto</a><header className="masthead"><div className="topbar"><a className="brand" href="/"><strong>LION</strong><span>Redazione</span></a>{session && <div className="account"><span>{role === 'admin' ? 'Direzione' : role === 'editor' ? 'Redazione' : session.user.email}</span><button onClick={() => db.auth.signOut()}>Esci</button></div>}</div></header>
+    {!db ? <main id="contenuto" className="container"><p role="alert">Configurazione di Supabase mancante.</p></main>
+      : session === undefined ? <main id="contenuto" className="container"><p>Caricamento…</p></main>
       : recovery || !session ? <Auth recovery={recovery} finish={() => setRecovery(false)}/>
-      : error ? <main className="container"><p role="alert">{error}</p></main>
+      : error ? <main id="contenuto" className="container"><p role="alert">{error}</p></main>
       : oauthId ? <Consent role={role}/>
-      : role === null ? <main className="container"><p>Caricamento…</p></main>
+      : role === null ? <main id="contenuto" className="container"><p>Caricamento…</p></main>
       : <Dashboard key={userId} user={session.user} role={role}/>}
-    <footer>Rivista nazionale LION <span>Portale di redazione</span></footer>
+    <footer><strong>LION</strong><span>Rivista nazionale · Portale di redazione</span></footer>
   </>;
 }
 createRoot(document.getElementById('root')).render(<App/>);

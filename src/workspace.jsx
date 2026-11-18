@@ -35,6 +35,11 @@ function Field({id,label,type='text',required}) {
 
 function Submit({kind,user,open,back}) {
   const [article,setArticle] = useState('');
+  const [step,setStep] = useState(0);
+  const stepTitle = useRef(null);
+  const steps = kind === 'article' ? ['Chi scrive','Articolo e allegati'] : ['Chi scrive','Il service','Voci e allegati'];
+  const lastStep = step === steps.length - 1;
+  useEffect(() => {stepTitle.current?.focus({preventScroll:true});},[step]);
   const [uploads,setUploads] = useState([]);
   const action = useAction();
   const id = useRef(crypto.randomUUID());
@@ -53,7 +58,32 @@ function Submit({kind,user,open,back}) {
   }
   async function send(event) {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget));
+    const form = event.currentTarget;
+    if (!lastStep) {
+      const invalid = [...form.querySelectorAll('fieldset[data-active="true"] :is(input,textarea,select)')].find(control => !control.validity.valid || (control.required && !control.value.trim()));
+      if (invalid) {
+        invalid.focus();
+        invalid.setCustomValidity('Compila questo campo.');
+        invalid.reportValidity();
+        invalid.setCustomValidity('');
+        return;
+      }
+      setStep(step + 1);
+      return;
+    }
+    const invalid = [...form.querySelectorAll('fieldset :is(input,textarea,select)')].find(control => !control.validity.valid || (control.required && !control.value.trim()));
+    if (invalid) {
+      const phase = Number(invalid.closest('fieldset').dataset.phase);
+      if (phase !== step) setStep(phase);
+      else {
+        invalid.focus();
+        invalid.setCustomValidity('Compila questo campo.');
+        invalid.reportValidity();
+        invalid.setCustomValidity('');
+      }
+      return;
+    }
+    const data = Object.fromEntries(new FormData(form));
     const {club,district,signature,...fields} = data;
     await action.run(async () => {
       if (!club.trim() || (kind === 'article' && (!signature.trim() || !article.trim()))) throw Error('Compila i campi obbligatori.');
@@ -77,22 +107,24 @@ function Submit({kind,user,open,back}) {
     });
   }
   return <section className="panel form-panel">
-    <button className="text-button" disabled={action.working} onClick={cancel}>← Torna agli invii</button>
-    <h1>{kinds[kind]}</h1>
-    <form onSubmit={send}>
-      <fieldset disabled={action.working}><legend>Chi</legend><div className="grid">
+    <button className="text-button" disabled={action.working} onClick={cancel}>← Tipo di invio</button>
+    <h1>{kind === 'article' ? 'Invia un articolo' : 'Racconta un service'}</h1>
+    <ol className="steps" aria-label="Passaggi dell’invio">{steps.map((label,index) => <li key={label} aria-current={step === index ? 'step' : undefined}><span aria-hidden="true">{index+1}</span>{label}</li>)}</ol>
+    <h2 className="step-title" tabIndex={-1} ref={stepTitle}>{steps[step]}</h2>
+    <form onSubmit={send} noValidate>
+      <fieldset data-phase={0} data-active={step === 0} hidden={step !== 0} disabled={action.working}><legend className="sr-only">Chi scrive</legend><div className="grid">
         <Field id="club" label={kind === 'service' ? 'Club o club promotori' : 'Club'} required/>
         <Field id="district" label="Distretto"/>
         <datalist id="districts">{districts.map(value => <option key={value} value={value}/>)}</datalist>
         <Field id="signature" label="Firma (nome e cognome di chi scrive)" required={kind === 'article'}/>
       </div></fieldset>
-      {kind === 'service' ? serviceGroups.map(([title,fields]) => <fieldset key={title} disabled={action.working}><legend>{title}</legend>
+      {kind === 'service' ? serviceGroups.map(([title,fields],index) => <fieldset key={title} data-phase={index < 2 ? 1 : 2} data-active={step === (index < 2 ? 1 : 2)} hidden={step !== (index < 2 ? 1 : 2)} disabled={action.working}><legend>{title}</legend>
         {fields[0][0].match(/^v[12]n$/) && <p className="muted">Riporta le parole realmente pronunciate, con nome e ruolo della persona.</p>}
-        {fields.map(([id,label,type,required]) => <Field key={id} {...{id,label,type,required}}/>)}</fieldset>) : <fieldset disabled={action.working}><legend>Testo</legend>
+        {fields.map(([id,label,type,required]) => <Field key={id} {...{id,label,type,required}}/>)}</fieldset>) : <fieldset data-phase={1} data-active={step === 1} hidden={step !== 1} disabled={action.working}><legend className="sr-only">Testo</legend>
         <label>Il tuo articolo <span className="required">*</span><textarea className="article-input" value={article} maxLength={100000} onChange={event => setArticle(event.target.value)} placeholder="Incolla titolo e testo oppure allega un file Word o TXT" required/></label>
         <div className="muted">{article.length.toLocaleString('it-IT')} battute · Lunghezza indicativa per la rivista nazionale: 1.500–1.800 battute spazi inclusi.</div>
       </fieldset>}
-      <fieldset disabled={action.working}><legend>Allegati</legend><label>Aggiungi documenti o foto<input type="file" accept=".docx,.doc,.txt,.pdf,.odt,.rtf,.jpg,.jpeg,.png,.webp" multiple onChange={addFiles}/></label>
+      <fieldset data-phase={steps.length - 1} data-active={lastStep} hidden={!lastStep} disabled={action.working}><legend>Allegati</legend><label>Aggiungi documenti o foto<input type="file" accept=".docx,.doc,.txt,.pdf,.odt,.rtf,.jpg,.jpeg,.png,.webp" multiple onChange={addFiles}/></label>
         {uploads.map((file,index) => <div className="file-row" key={index}><span>{file.name}</span><button type="button" onClick={() => action.run(async () => {
           if (stored.current.has(file)) {
             await result(files().remove([stored.current.get(file)]));
@@ -102,7 +134,10 @@ function Submit({kind,user,open,back}) {
         })}>Rimuovi</button></div>)}
       </fieldset>
       <ErrorLine text={action.error}/>
-      <button className="primary" disabled={action.working}>{action.working ? 'Attendi…' : 'Invia alla redazione'}</button>
+      <div className="form-actions">
+        {step > 0 && <button type="button" disabled={action.working} onClick={() => setStep(step - 1)}>Indietro</button>}
+        <button className="primary" disabled={action.working}>{action.working ? 'Attendi…' : lastStep ? 'Invia alla redazione' : 'Continua'}</button>
+      </div>
     </form>
   </section>;
 }
@@ -129,7 +164,7 @@ function Team({back}) {
   </section>;
 }
 
-function Detail({id,staff,back}) {
+function Detail({id,staff,back,justSubmitted}) {
   const [item,setItem] = useState(null);
   const [revisions,setRevisions] = useState([]);
   const [comments,setComments] = useState([]);
@@ -173,8 +208,9 @@ function Detail({id,staff,back}) {
     setTimeout(() => URL.revokeObjectURL(url),1000);
   }
   return <>
+    {justSubmitted && <p className="receipt" role="status">Contributo inviato alla redazione.</p>}
     <div className="detail-nav"><button className="text-button" onClick={back}>← Torna agli invii</button><button onClick={() => action.run(refresh)} disabled={action.working}>Aggiorna</button></div>
-    <div className="detail-heading"><div><p className="eyebrow">{kinds[item.kind]}</p><h1>{headline(item)}</h1><p className="muted">{[item.club,item.district,item.signature,fmt.format(new Date(item.created_at))].filter(Boolean).join(' · ')}</p></div>
+    <div className="detail-heading" data-enter><div><p className="eyebrow">{kinds[item.kind]}</p><h1>{headline(item)}</h1><p className="muted">{[item.club,item.district,item.signature,fmt.format(new Date(item.created_at))].filter(Boolean).join(' · ')}</p></div>
       {staff ? <label className="status-control">Stato<select value={item.status} disabled={action.working} onChange={event => {
         const status = event.target.value;
         action.run(async () => {await result(db.from('submissions').update({status}).eq('id',id).select('id').single());await refresh();});
@@ -182,7 +218,7 @@ function Detail({id,staff,back}) {
     </div>
     <ErrorLine text={action.error}/>
     <div className="workbench">
-      <section className="panel manuscript"><div className="editor-toolbar">
+      <section className="panel manuscript" aria-label="Testo e revisioni"><div className="editor-toolbar">
         <label>Versione<select value={version} onChange={event => {setVersion(event.target.value);setAnchor(null);setMode('read');}}>
           <option value="">{item.kind === 'service' ? 'Scheda inviata' : 'Testo originale'}</option>
           {revisions.map((entry,index) => <option key={entry.id} value={entry.id}>Revisione {revisions.length-index} · {entry.source === 'ai' ? 'AI' : 'Redazione'} · {entry.shared ? 'Condivisa' : 'Interna'}</option>)}</select></label>
@@ -227,46 +263,92 @@ function Detail({id,staff,back}) {
   </>;
 }
 
+function readView() {
+  const params = new URLSearchParams(location.search);
+  const item = params.get('invio');
+  if (item && /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(item)) return item;
+  const section = params.get('vista');
+  return ['new','article','service','team','account'].includes(section) ? section : 'list';
+}
+
+function SubmissionChoices({navigate}) {
+  return <div className="choices">
+    <button onClick={() => navigate('article')}><span className="tile-icon" aria-hidden="true">¶</span><span><strong>Invia un articolo</strong><small>Un testo già scritto da far rivedere.</small></span><span className="arrow" aria-hidden="true">↗</span></button>
+    <button onClick={() => navigate('service')}><span className="tile-icon" aria-hidden="true">✦</span><span><strong>Racconta un service</strong><small>Fatti, risultati e voci del tuo club.</small></span><span className="arrow" aria-hidden="true">↗</span></button>
+  </div>;
+}
+
 export function Dashboard({user,role}) {
-  const [view,setView] = useState(() => new URLSearchParams(location.search).get('invio') || 'list');
+  const [view,setView] = useState(readView);
+  const [submitted,setSubmitted] = useState(null);
   const [items,setItems] = useState([]);
   const [filter,setFilter] = useState('');
   const [search,setSearch] = useState('');
   const [page,setPage] = useState(0);
   const [next,setNext] = useState(false);
+  const [copyStatus,setCopyStatus] = useState('');
   const action = useAction();
+  const requestId = useRef(0);
   const staff = Boolean(role);
+  const activeView = view === 'team' && role !== 'admin' ? 'list' : view;
+  const formView = ['new','article','service'].includes(activeView);
+  function navigate(destination,replace=false) {
+    if (destination === 'list' && view === 'list') {load();return;}
+    const query = destination === 'list' ? '/' : ['new','article','service','team','account'].includes(destination)
+      ? '/?vista=' + destination : '/?invio=' + destination;
+    history[replace ? 'replaceState' : 'pushState'](null,'',query);
+    setView(destination);
+    window.scrollTo(0,0);
+  }
+  useEffect(() => {
+    const handleBack = () => setView(readView());
+    window.addEventListener('popstate',handleBack);
+    return () => window.removeEventListener('popstate',handleBack);
+  },[]);
+  const contentRef = useRef(null);
+  useEffect(() => {contentRef.current?.focus({preventScroll:true});},[activeView]);
   function load() {
+    const current = ++requestId.current;
     return action.run(async () => {
       let query = db.from('submissions').select('*').order('created_at',{ascending:false}).order('id').range(page*25,page*25+25);
       if (filter) query = query.eq('status',filter);
       if (search.trim()) query = query.ilike('club','%' + search.trim().replaceAll('%','\\%').replaceAll('_','\\_') + '%');
       const entries = await result(query);
+      if (current !== requestId.current) return;
       setItems(entries.slice(0,25));
       setNext(entries.length > 25);
     });
   }
-  useEffect(() => {if (view === 'list') load();},[view,filter,search,page]);
-  const back = () => setView('list');
-  return <main className="container">
-    {view === 'list' ? <>
-      <div className="page-heading"><div><p className="eyebrow">RIVISTA NAZIONALE LION</p><h1>{staff ? 'Scrivania di redazione' : 'I tuoi invii'}</h1><p>{staff ? 'Leggi, rivedi e segui i contributi dei club.' : 'Proponi un contributo e segui il lavoro della redazione.'}</p></div>
-        {role === 'admin' && <button onClick={() => setView('team')}>Collaboratori</button>}</div>
-      <div className="choices">
-        <button onClick={() => setView('article')}><span className="tile-icon">¶</span><span><strong>{kinds.article}</strong><small>Invia un testo già scritto</small></span><span className="arrow">↗</span></button>
-        <button onClick={() => setView('service')}><span className="tile-icon">✦</span><span><strong>{kinds.service}</strong><small>Raccogli fatti, numeri e testimonianze</small></span><span className="arrow">↗</span></button>
+  useEffect(() => {if (activeView === 'list') load();},[activeView,filter,search,page]);
+  const back = () => navigate('list');
+  const itemList = staff ? 'Tutti gli invii' : 'I miei invii';
+  return <div className="workspace-shell">
+    <nav className="workspace-nav" aria-label="Scrivania">
+      <p className="nav-title">{role === 'admin' ? 'Direzione' : staff ? 'Redazione' : 'Area autori'}</p>
+      <button className="nav-item" aria-current={!formView && !['team','account'].includes(activeView) ? 'page' : undefined} onClick={back}>{itemList}</button>
+      <button className="nav-item" aria-current={formView ? 'page' : undefined} onClick={() => navigate('new')}>Nuovo invio</button>
+      {role === 'admin' && <button className="nav-item" aria-current={activeView === 'team' ? 'page' : undefined} onClick={() => navigate('team')}>Collaboratori</button>}
+      <button className="nav-item account-nav" aria-current={activeView === 'account' ? 'page' : undefined} onClick={() => navigate('account')}>Il mio account</button>
+    </nav>
+    <main id="contenuto" className="container workspace-main" ref={contentRef} tabIndex={-1}>
+    {activeView === 'list' ? <>
+      <div className="page-heading" data-enter><div><h1>{staff ? 'Scrivania di redazione' : 'I tuoi invii'}</h1><p>{staff ? 'Consulta i contributi dei club e riprendi le revisioni.' : 'Invia un contributo e segui le risposte della redazione.'}</p></div>
+        <button className="primary" onClick={() => navigate('new')}><span aria-hidden="true">＋</span> Nuovo invio</button>
       </div>
       <section className="panel submissions">
-        <div className="list-tools"><h2>{staff ? 'Invii alla redazione' : 'Cronologia'}</h2>
+        <div className="list-tools"><h2>{staff ? 'Invii ricevuti' : 'Cronologia'}</h2>
           <input aria-label="Cerca per club" placeholder="Cerca per club" value={search} onChange={event => {setPage(0);setSearch(event.target.value);}}/>
-          <select aria-label="Filtra per stato" value={filter} onChange={event => {setPage(0);setFilter(event.target.value);}}><option value="">Tutti gli stati</option>{Object.entries(statuses).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select>
-          <button onClick={load} disabled={action.working}>Aggiorna</button></div>
+          <select aria-label="Filtra per stato" value={filter} onChange={event => {setPage(0);setFilter(event.target.value);}}><option value="">Tutti gli stati</option>{Object.entries(statuses).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</select></div>
         <ErrorLine text={action.error}/>
-        {!items.length && !action.error && <p className="empty">{action.working ? 'Caricamento…' : 'Nessun invio da mostrare.'}</p>}
-        {items.map(item => <button className="submission" key={item.id} onClick={() => setView(item.id)}><span><strong>{headline(item)}</strong><small>{[item.club,item.district,kinds[item.kind]].filter(Boolean).join(' · ')}</small></span><time>{fmt.format(new Date(item.created_at))}</time><span className={'status '+item.status}>{statuses[item.status]}</span><span className="arrow">→</span></button>)}
+        {!items.length && !action.error && <div className="empty" role="status"><strong>{action.working ? 'Caricamento…' : filter || search ? 'Nessun invio corrispondente' : 'Nessun invio'}</strong>{!action.working && !staff && !filter && !search && <p>Gli articoli e i service che invii compariranno qui.</p>}</div>}
+        {items.map(item => <button className="submission" key={item.id} onClick={() => navigate(item.id)}><span><strong>{headline(item)}</strong><small>{[item.club,item.district,item.kind === 'article' ? 'Articolo' : 'Service'].filter(Boolean).join(' · ')}</small></span><time>{fmt.format(new Date(item.created_at))}</time><span className={'status '+item.status}>{statuses[item.status]}</span><span className="arrow" aria-hidden="true">→</span></button>)}
         {(page > 0 || next) && <div className="actions paging"><button disabled={!page} onClick={() => setPage(page-1)}>Precedente</button><button disabled={!next} onClick={() => setPage(page+1)}>Successiva</button></div>}
       </section>
-      {!staff && <details className="muted"><summary>Codice account per la redazione</summary><p><code>{user.id}</code></p></details>}
-    </> : view === 'team' ? <Team back={back}/> : kinds[view] ? <Submit key={view} kind={view} user={user} open={setView} back={back}/> : <Detail key={view} id={view} staff={staff} back={back}/>}
-  </main>;
+    </> : activeView === 'new' ? <><button className="text-button" onClick={back}>← Torna agli invii</button><div className="page-heading choose-heading" data-enter><div><h1>Nuovo invio</h1><p>Scegli il modulo per il tuo contributo.</p></div></div><SubmissionChoices navigate={navigate}/></>
+    : activeView === 'account' ? <section className="panel form-panel account-panel"><h1>Il mio account</h1><p>{user.email}</p><h2>Codice account per la redazione</h2><p className="muted">Comunicalo direttamente alla Direzione se deve assegnarti il ruolo Redattore.</p><div className="file-row"><code>{user.id}</code><button onClick={async () => {try {await navigator.clipboard.writeText(user.id);setCopyStatus('Codice copiato.');} catch {setCopyStatus('Seleziona il codice per copiarlo manualmente.');}}}>Copia codice</button></div>{copyStatus && <p role="status">{copyStatus}</p>}</section>
+    : activeView === 'team' ? <Team back={back}/>
+    : kinds[activeView] ? <Submit key={activeView} kind={activeView} user={user} open={id => {setSubmitted(id);navigate(id,true);}} back={() => navigate('new')}/>
+    : <Detail key={activeView} id={activeView} staff={staff} back={back} justSubmitted={submitted === activeView}/>}
+    </main>
+  </div>;
 }
